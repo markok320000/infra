@@ -1,0 +1,156 @@
+# ===================== MongoDB =====================
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+spec:
+  selector:
+    app: mongo
+  ports:
+    - protocol: TCP
+      port: 27018       # Exposed externally
+      targetPort: 27017 # Container port
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:7.0
+          ports:
+            - containerPort: 27017
+          volumeMounts:
+            - name: mongo-data
+              mountPath: /data/db
+      volumes:
+        - name: mongo-data
+          persistentVolumeClaim:
+            claimName: mongo-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+# ===================== Backend =====================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: typing-test-backend
+spec:
+  selector:
+    app: typing-test-backend
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: typing-test-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: typing-test-backend
+  template:
+    metadata:
+      labels:
+        app: typing-test-backend
+    spec:
+      containers:
+        - name: typing-test-backend
+          image: markok32000/typing-test-backend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATA_MONGODB_URI
+              value: mongodb://mongo:27018/typingtestdb
+
+# ===================== Frontend =====================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: typing-test-frontend
+spec:
+  selector:
+    app: typing-test-frontend
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 5173
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: typing-test-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: typing-test-frontend
+  template:
+    metadata:
+      labels:
+        app: typing-test-frontend
+    spec:
+      containers:
+        - name: typing-test-frontend
+          image: markok32000/typing-test-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5173
+          command: ["npm", "run", "dev", "--", "--host"]
+
+# ===================== INGRESS =====================
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: typing-test-frontend-ingress
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: frontend.local
+      http:
+        paths:
+          # Frontend
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: typing-test-frontend
+                port:
+                  number: 3000
+          # Backend
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: typing-test-backend
+                port:
+                  number: 8080
+
